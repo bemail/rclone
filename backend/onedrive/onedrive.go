@@ -242,6 +242,11 @@ delete OneNote files or otherwise want them to show up in directory
 listing, set this option.`,
 			Default:  false,
 			Advanced: true,
+		}, {
+			Name:     "list_chunk",
+			Default:  1000,
+			Help:     "Size of listing chunk 1-1000.",
+			Advanced: true,
 		}},
 	})
 }
@@ -252,6 +257,7 @@ type Options struct {
 	DriveID            string        `config:"drive_id"`
 	DriveType          string        `config:"drive_type"`
 	ExposeOneNoteFiles bool          `config:"expose_onenote_files"`
+	ListChunk          int           `config:"list_chunk"`
 }
 
 // Fs represents a remote one drive
@@ -578,7 +584,7 @@ type listAllFn func(*api.Item) bool
 func (f *Fs) listAll(dirID string, directoriesOnly bool, filesOnly bool, fn listAllFn) (found bool, err error) {
 	// Top parameter asks for bigger pages of data
 	// https://dev.onedrive.com/odata/optional-query-parameters.htm
-	opts := newOptsCall(dirID, "GET", "/children?$top=1000")
+	opts := newOptsCall(dirID, "GET", fmt.Sprintf("/children?$top=%d", f.opt.ListChunk))
 OUTER:
 	for {
 		var result api.ListChildrenResponse
