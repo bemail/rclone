@@ -11,7 +11,7 @@ require (
 	github.com/abbot/go-http-auth v0.4.0
 	github.com/anacrolix/dms v1.1.0
 	github.com/atotto/clipboard v0.1.2
-	github.com/aws/aws-sdk-go v1.25.31
+	github.com/aws/aws-sdk-go v1.26.8
 	github.com/billziss-gh/cgofuse v1.2.0
 	github.com/djherbis/times v1.2.0
 	github.com/dropbox/dropbox-sdk-go-unofficial v5.4.0+incompatible
