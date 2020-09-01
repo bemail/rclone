@@ -1,4 +1,4 @@
-// +build !linux,!darwin,!freebsd
+// +build !linux,!darwin,!freebsd,!openbsd,!windows
 
 package vfstest
 
@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"golang.org/x/sys/windows"
+	"github.com/rclone/rclone/vfs"
 )
 
 // TestWriteFileDoubleClose tests double close on write
@@ -16,10 +16,5 @@ func TestWriteFileDoubleClose(t *testing.T) {
 
 // writeTestDup performs the platform-specific implementation of the dup() syscall
 func writeTestDup(oldfd uintptr) (uintptr, error) {
-	p, err := windows.GetCurrentProcess()
-	if err != nil {
-		return 0, err
-	}
-	var h windows.Handle
-	return uintptr(h), windows.DuplicateHandle(p, windows.Handle(oldfd), p, &h, 0, true, windows.DUPLICATE_SAME_ACCESS)
+	return oldfd, vfs.ENOSYS
 }
