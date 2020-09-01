@@ -4,7 +4,7 @@
 
 // +build cmount
 // +build cgo
-// +build linux darwin freebsd windows
+// +build linux darwin freebsd openbsd windows
 
 package cmount
 
@@ -37,13 +37,17 @@ func mountOptions(VFS *vfs.VFS, device string, mountpoint string, opt *mountlib.
 	options = []string{
 		"-o", "fsname=" + device,
 		"-o", "subtype=rclone",
-		"-o", fmt.Sprintf("max_readahead=%d", opt.MaxReadAhead),
 		"-o", fmt.Sprintf("attr_timeout=%g", opt.AttrTimeout.Seconds()),
-		// This causes FUSE to supply O_TRUNC with the Open
-		// call which is more efficient for cmount.  However
-		// it does not work with cgofuse on Windows with
-		// WinFSP so cmount must work with or without it.
-		"-o", "atomic_o_trunc",
+	}
+	if runtime.GOOS != "openbsd" {
+		options = append(options,
+			"-o", fmt.Sprintf("max_readahead=%d", opt.MaxReadAhead),
+			// This causes FUSE to supply O_TRUNC with the Open
+			// call which is more efficient for cmount.  However
+			// it does not work with cgofuse on Windows with
+			// WinFSP so cmount must work with or without it.
+			"-o", "atomic_o_trunc",
+		)
 	}
 	if opt.DebugFUSE {
 		options = append(options, "-o", "debug")

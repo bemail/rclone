@@ -1,6 +1,6 @@
 // +build cmount
 // +build cgo
-// +build linux darwin freebsd windows
+// +build linux darwin freebsd openbsd windows
 // +build !race !windows
 
 // FIXME this doesn't work with the race detector under Windows either

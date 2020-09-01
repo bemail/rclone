@@ -1,6 +1,6 @@
 // +build cmount
 // +build cgo
-// +build linux darwin freebsd windows
+// +build linux darwin freebsd openbsd windows
 
 package cmount
 
@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"runtime"
 	"sync"
 	"time"
 
@@ -225,6 +226,12 @@ func (fsys *FS) Readdir(dirPath string,
 	// We can't seek in directories and FUSE should know that so
 	// return an error if ofst is ever set.
 	if ofst > 0 {
+		// However openbsd doesn't seem to know this - perhaps a bug in its
+		// FUSE implementation or a bug in cgofuse?
+		// See: https://github.com/billziss-gh/cgofuse/issues/49
+		if runtime.GOOS == "openbsd" {
+			return 0
+		}
 		return -fuse.ESPIPE
 	}
 
