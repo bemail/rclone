@@ -373,7 +373,36 @@ func (f *Fs) moveFile(ctx context.Context, url string, folderID int, rename stri
 	})
 
 	if err != nil {
-		return nil, errors.Wrap(err, "couldn't copy file")
+		return nil, errors.Wrap(err, "couldn't move file")
+	}
+
+	return response, nil
+}
+
+func (f *Fs) moveDir(ctx context.Context, folderID int, newLeaf string, destinationFolderID *int) (response *MoveDirResponse, err error) {
+	if destinationFolderID != nil && newLeaf != "" {
+		return nil, errors.New("can't move folder and rename at the same time")
+	}
+	request := &MoveDirRequest{
+		FolderID:            folderID,
+		DestinationFolderID: destinationFolderID,
+		Rename:              newLeaf,
+		// DestinationUser:     destinationUser,
+	}
+
+	opts := rest.Opts{
+		Method: "POST",
+		Path:   "/folder/mv.cgi",
+	}
+
+	response = &MoveDirResponse{}
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err := f.rest.CallJSON(ctx, &opts, request, response)
+		return shouldRetry(ctx, resp, err)
+	})
+
+	if err != nil {
+		return nil, errors.Wrap(err, "couldn't move dir")
 	}
 
 	return response, nil

@@ -19,6 +19,7 @@ import (
 	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/pacer"
+	"github.com/rclone/rclone/lib/random"
 	"github.com/rclone/rclone/lib/rest"
 )
 
@@ -483,6 +484,83 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	return dstObj, nil
 }
 
+// DirMove moves src, srcRemote to this remote at dstRemote
+// using server-side move operations.
+//
+// Will only be called if src.Fs().Name() == f.Name()
+//
+// If it isn't possible then return fs.ErrorCantDirMove
+//
+// If destination exists then return fs.ErrorDirExists
+//
+// This is complicated by the fact that we can't use moveDir to move
+// to a different directory AND rename at the same time as it can
+// overwrite files in the source directory.
+func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string) error {
+	srcFs, ok := src.(*Fs)
+	if !ok {
+		fs.Debugf(srcFs, "Can't move directory - not same remote type")
+		return fs.ErrorCantDirMove
+	}
+
+	srcID, srcDirectoryID, srcLeaf, dstDirectoryID, dstLeaf, err := f.dirCache.DirMove(ctx, srcFs.dirCache, srcFs.root, srcRemote, f.root, dstRemote)
+	if err != nil {
+		return err
+	}
+	srcIDnumeric, err := strconv.Atoi(srcID)
+	if err != nil {
+		return err
+	}
+	dstDirectoryIDnumeric, err := strconv.Atoi(dstDirectoryID)
+	if err != nil {
+		return err
+	}
+
+	doRenameLeaf := srcLeaf != dstLeaf
+	doMove := srcDirectoryID != dstDirectoryID
+
+	// Now rename the leaf to a temporary name if we are moving to
+	// another directory to make sure we don't overwrite something
+	// in the source directory by accident
+	var resp *MoveDirResponse
+	if doRenameLeaf && doMove {
+		tmpLeaf := dstLeaf + "." + random.String(8)
+		resp, err = f.moveDir(ctx, srcIDnumeric, tmpLeaf, nil)
+		if err != nil {
+			return errors.Wrap(err, "couldn't rename leaf to temp name")
+		}
+		if resp.Status != "OK" {
+			return errors.Errorf("couldn't rename leaf to temp name: %s", resp.Message)
+		}
+	}
+
+	// Move the object to a dst directory (with the existing name)
+	// if required
+	if doMove {
+		resp, err = f.moveDir(ctx, srcIDnumeric, "", &dstDirectoryIDnumeric)
+		if err != nil {
+			return errors.Wrap(err, "couldn't move directory")
+		}
+		if resp.Status != "OK" {
+			return errors.Errorf("couldn't move directory: %s", resp.Message)
+		}
+	}
+
+	// Rename the leaf to its final name if required
+	if doRenameLeaf {
+		resp, err = f.moveDir(ctx, srcIDnumeric, dstLeaf, nil)
+		if err != nil {
+			return errors.Wrap(err, "couldn't rename leaf")
+		}
+		if resp.Status != "OK" {
+			return errors.Errorf("couldn't rename leaf: %s", resp.Message)
+		}
+	}
+
+	srcFs.dirCache.FlushDir(srcRemote)
+	return nil
+}
+
 // Copy src to this remote using server side move operations.
 func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
 	srcObj, ok := src.(*Object)
@@ -530,6 +608,7 @@ func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, 
 var (
 	_ fs.Fs              = (*Fs)(nil)
 	_ fs.Mover           = (*Fs)(nil)
+	_ fs.DirMover        = (*Fs)(nil)
 	_ fs.Copier          = (*Fs)(nil)
 	_ fs.PublicLinker    = (*Fs)(nil)
 	_ fs.PutUncheckeder  = (*Fs)(nil)
