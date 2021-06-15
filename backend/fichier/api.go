@@ -379,10 +379,7 @@ func (f *Fs) moveFile(ctx context.Context, url string, folderID int, rename stri
 	return response, nil
 }
 
-func (f *Fs) moveDir(ctx context.Context, folderID int, newLeaf string, destinationFolderID *int) (response *MoveDirResponse, err error) {
-	if destinationFolderID != nil && newLeaf != "" {
-		return nil, errors.New("can't move folder and rename at the same time")
-	}
+func (f *Fs) moveDir(ctx context.Context, folderID int, newLeaf string, destinationFolderID int) (response *MoveDirResponse, err error) {
 	request := &MoveDirRequest{
 		FolderID:            folderID,
 		DestinationFolderID: destinationFolderID,

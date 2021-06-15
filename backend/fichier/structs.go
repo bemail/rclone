@@ -72,7 +72,7 @@ type MoveFileResponse struct {
 // MoveDirRequest is the request structure of the corresponding request
 type MoveDirRequest struct {
 	FolderID            int    `json:"folder_id"`
-	DestinationFolderID *int   `json:"destination_folder_id,omitempty"`
+	DestinationFolderID int    `json:"destination_folder_id,omitempty"`
 	DestinationUser     string `json:"destination_user"`
 	Rename              string `json:"rename,omitempty"`
 }

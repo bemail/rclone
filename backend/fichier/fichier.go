@@ -19,7 +19,6 @@ import (
 	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/pacer"
-	"github.com/rclone/rclone/lib/random"
 	"github.com/rclone/rclone/lib/rest"
 )
 
@@ -503,7 +502,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 		return fs.ErrorCantDirMove
 	}
 
-	srcID, srcDirectoryID, srcLeaf, dstDirectoryID, dstLeaf, err := f.dirCache.DirMove(ctx, srcFs.dirCache, srcFs.root, srcRemote, f.root, dstRemote)
+	srcID, _, _, dstDirectoryID, dstLeaf, err := f.dirCache.DirMove(ctx, srcFs.dirCache, srcFs.root, srcRemote, f.root, dstRemote)
 	if err != nil {
 		return err
 	}
@@ -516,45 +515,13 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 		return err
 	}
 
-	doRenameLeaf := srcLeaf != dstLeaf
-	doMove := srcDirectoryID != dstDirectoryID
-
-	// Now rename the leaf to a temporary name if we are moving to
-	// another directory to make sure we don't overwrite something
-	// in the source directory by accident
 	var resp *MoveDirResponse
-	if doRenameLeaf && doMove {
-		tmpLeaf := dstLeaf + "." + random.String(8)
-		resp, err = f.moveDir(ctx, srcIDnumeric, tmpLeaf, nil)
-		if err != nil {
-			return errors.Wrap(err, "couldn't rename leaf to temp name")
-		}
-		if resp.Status != "OK" {
-			return errors.Errorf("couldn't rename leaf to temp name: %s", resp.Message)
-		}
+	resp, err = f.moveDir(ctx, srcIDnumeric, dstLeaf, dstDirectoryIDnumeric)
+	if err != nil {
+		return errors.Wrap(err, "couldn't rename leaf")
 	}
-
-	// Move the object to a dst directory (with the existing name)
-	// if required
-	if doMove {
-		resp, err = f.moveDir(ctx, srcIDnumeric, "", &dstDirectoryIDnumeric)
-		if err != nil {
-			return errors.Wrap(err, "couldn't move directory")
-		}
-		if resp.Status != "OK" {
-			return errors.Errorf("couldn't move directory: %s", resp.Message)
-		}
-	}
-
-	// Rename the leaf to its final name if required
-	if doRenameLeaf {
-		resp, err = f.moveDir(ctx, srcIDnumeric, dstLeaf, nil)
-		if err != nil {
-			return errors.Wrap(err, "couldn't rename leaf")
-		}
-		if resp.Status != "OK" {
-			return errors.Errorf("couldn't rename leaf: %s", resp.Message)
-		}
+	if resp.Status != "OK" {
+		return errors.Errorf("couldn't rename leaf: %s", resp.Message)
 	}
 
 	srcFs.dirCache.FlushDir(srcRemote)
