@@ -33,7 +33,6 @@ import (
 
 // Constants
 const devUnset = 0xdeadbeefcafebabe                                       // a device id meaning it is unset
-const linkSuffix = ".rclonelink"                                          // The suffix added to a translated symbolic link
 const useReadDir = (runtime.GOOS == "windows" || runtime.GOOS == "plan9") // these OSes read FileInfos directly
 
 // Register with Fs
@@ -73,7 +72,7 @@ supported by all file systems) under the "user.*" prefix.
 			Advanced: true,
 		}, {
 			Name:     "links",
-			Help:     "Translate symlinks to/from regular files with a '" + linkSuffix + "' extension.",
+			Help:     "Translate symlinks to/from regular files with a '" + fs.LinkSuffix + "' extension.",
 			Default:  false,
 			NoPrefix: true,
 			ShortOpt: "l",
@@ -200,9 +199,9 @@ cause disk fragmentation and can be slow to work with.`,
 			Help: `Disable setting modtime.
 
 Normally rclone updates modification time of files after they are done
-uploading. This can cause permissions issues on Linux platforms when 
+uploading. This can cause permissions issues on Linux platforms when
 the user rclone is running as does not own the file uploaded, such as
-when copying to a CIFS mount owned by another user. If this option is 
+when copying to a CIFS mount owned by another user. If this option is
 enabled, rclone will no longer update the modtime after copying a file.`,
 			Default:  false,
 			Advanced: true,
@@ -376,8 +375,8 @@ func (f *Fs) caseInsensitive() bool {
 //
 // for regular files, localPath is returned unchanged
 func translateLink(remote, localPath string) (newLocalPath string, isTranslatedLink bool) {
-	isTranslatedLink = strings.HasSuffix(remote, linkSuffix)
-	newLocalPath = strings.TrimSuffix(localPath, linkSuffix)
+	isTranslatedLink = strings.HasSuffix(remote, fs.LinkSuffix)
+	newLocalPath = strings.TrimSuffix(localPath, fs.LinkSuffix)
 	return newLocalPath, isTranslatedLink
 }
 
@@ -552,7 +551,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 			} else {
 				// Check whether this link should be translated
 				if f.opt.TranslateSymlinks && fi.Mode()&os.ModeSymlink != 0 {
-					newRemote += linkSuffix
+					newRemote += fs.LinkSuffix
 				}
 				fso, err := f.newObjectWithInfo(newRemote, fi)
 				if err != nil {
