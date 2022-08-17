@@ -500,7 +500,7 @@ func (vfs *VFS) OpenFile(name string, flags int, perm os.FileMode) (fd Handle, e
 		if err != nil {
 			return nil, err
 		}
-		node, err = dir.Create(leaf, flags)
+		node, err = dir.Create(leaf, flags, perm)
 		if err != nil {
 			return nil, err
 		}
@@ -512,7 +512,7 @@ func (vfs *VFS) OpenFile(name string, flags int, perm os.FileMode) (fd Handle, e
 // the returned file can be used for reading; the associated file
 // descriptor has mode O_RDONLY.
 func (vfs *VFS) Open(name string) (Handle, error) {
-	return vfs.OpenFile(name, os.O_RDONLY, 0)
+	return vfs.OpenFile(name, os.O_RDONLY, vfs.Opt.FilePerms)
 }
 
 // Create creates the named file with mode 0666 (before umask), truncating
@@ -520,7 +520,7 @@ func (vfs *VFS) Open(name string) (Handle, error) {
 // File can be used for I/O; the associated file descriptor has mode
 // O_RDWR.
 func (vfs *VFS) Create(name string) (Handle, error) {
-	return vfs.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+	return vfs.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_TRUNC, vfs.Opt.FilePerms)
 }
 
 // Rename oldName to newName

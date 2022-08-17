@@ -141,11 +141,15 @@ var _ fusefs.NodeCreater = (*Dir)(nil)
 // Create makes a new file
 func (d *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (node fusefs.Node, handle fusefs.Handle, err error) {
 	defer log.Trace(d, "name=%q", req.Name)("node=%v, handle=%v, err=%v", &node, &handle, &err)
-	file, err := d.Dir.Create(req.Name, int(req.Flags))
+	// translate the fuse flags to os flags
+	osFlags := int(req.Flags) | os.O_CREATE
+	// translate to os mode
+	osMode := req.Mode
+	file, err := d.Dir.Create(req.Name, osFlags, osMode)
 	if err != nil {
 		return nil, nil, translateError(err)
 	}
-	fh, err := file.Open(int(req.Flags) | os.O_CREATE)
+	fh, err := file.Open(osFlags)
 	if err != nil {
 		return nil, nil, translateError(err)
 	}

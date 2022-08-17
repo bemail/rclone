@@ -326,7 +326,9 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 	}
 	// translate the fuse flags to os flags
 	osFlags := int(flags) | os.O_CREATE
-	file, err := dir.Create(name, osFlags)
+	// translate the fuse mode to os mode
+	osMode := getFileMode(mode)
+	file, err := dir.Create(name, osFlags, osMode)
 	if err != nil {
 		return nil, nil, 0, translateError(err)
 	}

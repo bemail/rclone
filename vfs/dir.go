@@ -840,7 +840,7 @@ func (d *Dir) Open(flags int) (fd Handle, err error) {
 }
 
 // Create makes a new file node
-func (d *Dir) Create(name string, flags int) (*File, error) {
+func (d *Dir) Create(name string, osFlags int, osMode os.FileMode) (*File, error) {
 	// fs.Debugf(path, "Dir.Create")
 	// Return existing node if one exists
 	node, err := d.stat(name)

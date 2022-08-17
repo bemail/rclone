@@ -330,13 +330,15 @@ func (fsys *FS) CreateEx(filePath string, mode uint32, fi *fuse.FileInfo_t) (err
 	if errc != 0 {
 		return errc
 	}
-	file, err := parentDir.Create(leaf, fi.Flags)
+	// translate the fuse flags to os flags
+	osFlags := translateOpenFlags(fi.Flags) | os.O_CREATE
+	// translate the fuse mode to os mode
+	osMode := getFileMode(mode)
+	file, err := parentDir.Create(leaf, osFlags, osMode)
 	if err != nil {
 		return translateError(err)
 	}
-	// translate the fuse flags to os flags
-	flags := translateOpenFlags(fi.Flags) | os.O_CREATE
-	handle, err := file.Open(flags)
+	handle, err := file.Open(osFlags)
 	if err != nil {
 		return translateError(err)
 	}
@@ -625,6 +627,25 @@ func translateOpenFlags(inFlags int) (outFlags int) {
 	}
 	// NB O_SYNC isn't defined by fuse
 	return outFlags
+}
+
+// convert fuse mode to os.FileMode
+func getFileMode(mode uint32) os.FileMode {
+	osMode := os.FileMode(0)
+	if mode&fuse.S_IFDIR != 0 {
+		mode ^= fuse.S_IFDIR
+		osMode |= os.ModeDir
+	} else if mode&fuse.S_IFREG != 0 {
+		mode ^= fuse.S_IFREG
+	} else if mode&fuse.S_IFLNK != 0 {
+		mode ^= fuse.S_IFLNK
+		osMode |= os.ModeSymlink
+	} else if mode&fuse.S_IFIFO != 0 {
+		mode ^= fuse.S_IFIFO
+		osMode |= os.ModeNamedPipe
+	}
+	osMode |= os.FileMode(mode)
+	return osMode
 }
 
 // Make sure interfaces are satisfied

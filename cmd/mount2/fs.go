@@ -60,6 +60,25 @@ func getMode(node os.FileInfo) uint32 {
 	return uint32(Mode)
 }
 
+// convert fuse mode to os.FileMode
+func getFileMode(mode uint32) os.FileMode {
+	osMode := os.FileMode(0)
+	if mode&fuse.S_IFDIR != 0 {
+		mode ^= fuse.S_IFDIR
+		osMode |= os.ModeDir
+	} else if mode&fuse.S_IFREG != 0 {
+		mode ^= fuse.S_IFREG
+	} else if mode&fuse.S_IFLNK != 0 {
+		mode ^= fuse.S_IFLNK
+		osMode |= os.ModeSymlink
+	} else if mode&fuse.S_IFIFO != 0 {
+		mode ^= fuse.S_IFIFO
+		osMode |= os.ModeNamedPipe
+	}
+	osMode |= os.FileMode(mode)
+	return osMode
+}
+
 // fill in attr from node
 func setAttr(node vfs.Node, attr *fuse.Attr) {
 	Size := uint64(node.Size())
