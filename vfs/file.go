@@ -51,19 +51,24 @@ type File struct {
 	pendingRenameFun func(ctx context.Context) error // will be run/renamed after all writers close
 	sys              atomic.Value                    // user defined info to be attached here
 	nwriters         int32                           // len(writers) which is read/updated with atomic
-	appendMode       bool                            // file was opened with O_APPEND
+	mode             os.FileMode                     // file mode, can be regular file or symlink, with permissions
 }
 
 // newFile creates a new File
 //
 // o may be nil
 func newFile(d *Dir, dPath string, o fs.Object, leaf string) *File {
+	mode := d.vfs.Opt.FilePerms
+	if d.vfs.IsSymlink(leaf) {
+		mode = os.ModePerm | os.ModeSymlink
+	}
 	f := &File{
 		d:     d,
 		dPath: dPath,
 		o:     o,
 		leaf:  leaf,
 		inode: newInode(),
+		mode:  mode,
 	}
 	if o != nil {
 		f.size = o.Size()
@@ -98,11 +103,12 @@ func (f *File) IsSymlink() bool {
 func (f *File) Mode() (mode os.FileMode) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	mode = f.d.vfs.Opt.FilePerms
-	if f.appendMode {
-		mode |= os.ModeAppend
+	// We could return the passed *create* FileMode, but it seems rclone want *always* Opt.FilePerms
+	// as per unit tests. So just return what we store for symlinks, and tweak for the rest.
+	if f.mode&os.ModeSymlink != 0 {
+		return f.mode
 	}
-	return mode
+	return (f.mode & ^os.ModePerm) | f.d.vfs.Opt.FilePerms
 }
 
 // Name (base) of the directory - satisfies Node interface
@@ -694,7 +700,7 @@ func (f *File) Open(flags int) (fd Handle, err error) {
 	if flags&os.O_APPEND != 0 {
 		read = true
 		f.mu.Lock()
-		f.appendMode = true
+		f.mode |= os.ModeAppend
 		f.mu.Unlock()
 	}
 
