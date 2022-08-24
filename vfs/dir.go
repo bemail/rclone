@@ -1032,6 +1032,26 @@ func (d *Dir) Rename(oldName, newName string, destDir *Dir) error {
 		fs.Errorf(oldPath, "Dir.Rename error: %v", err)
 		return err
 	}
+	if oldNode.Mode()&os.ModeSymlink != 0 {
+		if !strings.HasSuffix(oldName, fs.LinkSuffix) {
+			if !d.vfs.Opt.Links {
+				fs.Errorf(nil, "(Rename) Invalid symlink suffix %v", oldName)
+				return EINVAL
+			}
+
+			oldName += fs.LinkSuffix
+			oldPath += fs.LinkSuffix
+		}
+		if !strings.HasSuffix(newName, fs.LinkSuffix) {
+			if !d.vfs.Opt.Links {
+				fs.Errorf(nil, "(Rename) Invalid symlink suffix %v", newName)
+				return EINVAL
+			}
+
+			newName += fs.LinkSuffix
+			newPath += fs.LinkSuffix
+		}
+	}
 	switch x := oldNode.DirEntry().(type) {
 	case nil:
 		if oldFile, ok := oldNode.(*File); ok {

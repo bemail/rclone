@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"syscall"
 	"time"
 
@@ -244,6 +245,26 @@ var _ fusefs.NodeLinker = (*Dir)(nil)
 func (d *Dir) Link(ctx context.Context, req *fuse.LinkRequest, old fusefs.Node) (newNode fusefs.Node, err error) {
 	defer log.Trace(d, "req=%v, old=%v", req, old)("new=%v, err=%v", &newNode, &err)
 	return nil, syscall.ENOSYS
+}
+
+var _ fusefs.NodeSymlinker = (*Dir)(nil)
+
+// Symlink create a symbolic link.
+func (d *Dir) Symlink(ctx context.Context, req *fuse.SymlinkRequest) (node fusefs.Node, err error) {
+	defer log.Trace(d, "Requested to symlink newname=%v, target=%v", req.NewName, req.Target)("node=%v, err=%v", &node, &err)
+
+	err = d.VFS().Symlink(req.Target, path.Join(d.Path(), req.NewName))
+	if err != nil {
+		return nil, err
+	}
+
+	n, err := d.Stat(req.NewName)
+	if err != nil {
+		return nil, err
+	}
+
+	node = &File{n.(*vfs.File), d.fsys}
+	return node, nil
 }
 
 // Check interface satisfied

@@ -410,3 +410,41 @@ func (n *Node) Rename(ctx context.Context, oldName string, newParent fusefs.Inod
 }
 
 var _ = (fusefs.NodeRenamer)((*Node)(nil))
+
+var _ fusefs.NodeReadlinker = (*Node)(nil)
+
+// Readlink read symbolic link target.
+func (n *Node) Readlink(ctx context.Context) (ret []byte, err syscall.Errno) {
+	defer log.Trace(n, "Requested to read link")("ret=%v, err=%v", &ret, &err)
+
+	s, serr := n.node.VFS().Readlink(n.node.Path())
+	if serr != nil {
+		return nil, translateError(serr)
+	}
+	return []byte(s), 0
+}
+
+var _ fusefs.NodeSymlinker = (*Node)(nil)
+
+// Symlink create symbolic link.
+func (n *Node) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (node *fusefs.Inode, err syscall.Errno) {
+	defer log.Trace(n, "Requested to symlink name=%v, target=%v", name, target)("node=%v, err=%v", &node, &err)
+
+	serr := n.node.VFS().Symlink(target, path.Join(n.node.Path(), name))
+	if serr != nil {
+		return nil, translateError(serr)
+	}
+
+	// Find the created node
+	vfsNode, err := n.lookupVfsNodeInDir(name)
+	if err != 0 {
+		return nil, err
+	}
+
+	n.fsys.setEntryOut(vfsNode, out)
+	newNode := newNode(n.fsys, vfsNode)
+	fs.Debugf(nil, "attr=%#v", out.Attr)
+	newInode := n.NewInode(ctx, newNode, fusefs.StableAttr{Mode: out.Attr.Mode})
+
+	return newInode, 0
+}

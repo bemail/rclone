@@ -730,3 +730,71 @@ func (vfs *VFS) TrimSymlink(remote string) (string, bool) {
 
 	return remote, false
 }
+
+// Readlink returns the destination of the named symbolic link.
+// If there is an error, it will be of type *PathError.
+func (vfs *VFS) Readlink(name string) (s string, err error) {
+	if !strings.HasSuffix(name, fs.LinkSuffix) {
+		if !vfs.Opt.Links {
+			fs.Errorf(nil, "(Readlink) Invalid symlink suffix %v", name)
+			return "", EINVAL
+		}
+
+		name += fs.LinkSuffix
+	}
+
+	b, err := vfs.ReadFile(name)
+	if err != nil {
+		return "", err
+	}
+
+	return string(b), nil
+}
+
+// Symlink creates newname as a symbolic link to oldname.
+// On Windows, a symlink to a non-existent oldname creates a file symlink;
+// if oldname is later created as a directory the symlink will not work.
+// If there is an error, it will be of type *LinkError.
+func (vfs *VFS) Symlink(oldname, newname string) error {
+	if strings.HasSuffix(oldname, fs.LinkSuffix) {
+		if vfs.Opt.Links {
+			fs.Errorf(nil, "(Symlink-) Invalid symlink suffix %v", oldname)
+			return EINVAL
+		}
+
+		oldname = strings.TrimSuffix(oldname, fs.LinkSuffix)
+	}
+
+	osFlags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	osMode := os.FileMode(0)
+
+	if !strings.HasSuffix(newname, fs.LinkSuffix) {
+		if !vfs.Opt.Links {
+			fs.Errorf(nil, "(Symlink+) Invalid symlink suffix %v", newname)
+			return EINVAL
+		}
+
+		newname += fs.LinkSuffix
+	}
+
+	if vfs.Opt.Links {
+		osMode = os.ModePerm | os.ModeSymlink
+	}
+
+	fh, err := vfs.OpenFile(newname, osFlags, osMode)
+	if err != nil {
+		return err
+	}
+
+	_, err = fh.Write([]byte(oldname))
+	if err != nil {
+		return err
+	}
+
+	err = fh.Release()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}

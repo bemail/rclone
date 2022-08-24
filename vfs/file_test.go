@@ -1,13 +1,20 @@
 package vfs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"log"
 	"os"
+	_ "path"
+	"strings"
+	_ "strings"
 	"testing"
 
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/fs/operations"
 	"github.com/rclone/rclone/fstest"
 	"github.com/rclone/rclone/fstest/mockfs"
@@ -17,20 +24,74 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func fileCreate(t *testing.T, mode vfscommon.CacheMode) (r *fstest.Run, vfs *VFS, fh *File, item fstest.Item, cleanup func()) {
+func fileCreateLinks(t *testing.T, mode vfscommon.CacheMode, links bool) (r *fstest.Run, vfs *VFS, fh *File, item fstest.Item, lh *File, linkItem fstest.Item, cleanup func()) {
 	opt := vfscommon.DefaultOpt
 	opt.CacheMode = mode
 	opt.WriteBack = writeBackDelay
+	opt.Links = links
 	r, vfs, cleanup = newTestVFSOpt(t, &opt)
 
 	file1 := r.WriteObject(context.Background(), "dir/file1", "file1 contents", t1)
 	r.CheckRemoteItems(t, file1)
 
-	node, err := vfs.Stat("dir/file1")
+	node, err := vfs.Stat(file1.Path)
 	require.NoError(t, err)
 	require.True(t, node.Mode().IsRegular())
 
-	return r, vfs, node.(*File), file1, cleanup
+	// For some reason this does not works - Stat fails and return file not found ?
+	/*
+		// Force create a link named link1[.rclonelink] in root pointing to dir/file1
+		link1 := r.WriteObject(context.Background(), "dir2/link1"+fs.LinkSuffix, "dir/file1", t1)
+		r.CheckRemoteItems(t, file1, link1)
+
+		linkNode, err := vfs.Stat(link1.Path)
+		require.NoError(t, err)
+		if (links) {
+			require.True(t, linkNode.Mode() & os.ModeSymlink != 0)
+		} else {
+			require.True(t, linkNode.Mode().IsRegular())
+		}
+	*/
+
+	return r, vfs, node.(*File), file1, nil /*linkNode.(*File)*/, fstest.Item{} /*link1*/, cleanup
+}
+
+func fileCreate(t *testing.T, mode vfscommon.CacheMode) (r *fstest.Run, vfs *VFS, fh *File, item fstest.Item, cleanup func()) {
+	r, vfs, fh, item, _, _, cleanup = fileCreateLinks(t, mode, false)
+	return r, vfs, fh, item, cleanup
+}
+
+// newItemFromFile creates a fstest.item from a vfs file
+func newItemFromFile(file *File) fstest.Item {
+	fh, err := file.Open(os.O_RDONLY)
+	if err != nil {
+		log.Fatalf("Failed to open file for reading: %v", err)
+	}
+
+	content, err := ioutil.ReadAll(fh)
+	if err != nil {
+		log.Fatalf("Failed to read all file: %v", err)
+	}
+
+	err = fh.Close()
+	if err != nil {
+		log.Fatalf("Failed to close file: %v", err)
+	}
+
+	hash := hash.NewMultiHasher()
+	buf := bytes.NewBufferString(string(content))
+	_, err = io.Copy(hash, buf)
+	if err != nil {
+		log.Fatalf("Failed to create item: %v", err)
+	}
+
+	i := fstest.Item{
+		Path:    file.Path(),
+		ModTime: file.ModTime(),
+		Size:    file.Size(),
+		Hashes:  hash.Sums(),
+	}
+	return i
 }
 
 func TestFileMethods(t *testing.T) {
@@ -164,15 +225,19 @@ func TestFileSetModTime(t *testing.T) {
 	}
 }
 
-func fileCheckContents(t *testing.T, file *File) {
+func fileCheckGivenContents(t *testing.T, file *File, expected string) {
 	fd, err := file.Open(os.O_RDONLY)
 	require.NoError(t, err)
 
 	contents, err := ioutil.ReadAll(fd)
 	require.NoError(t, err)
-	assert.Equal(t, "file1 contents", string(contents))
+	assert.Equal(t, expected, string(contents))
 
 	require.NoError(t, fd.Close())
+}
+
+func fileCheckContents(t *testing.T, file *File) {
+	fileCheckGivenContents(t, file, "file1 contents")
 }
 
 func TestFileOpenRead(t *testing.T) {
@@ -416,6 +481,189 @@ func TestFileRename(t *testing.T) {
 	} {
 		t.Run(fmt.Sprintf("%v,forceCache=%v", test.mode, test.forceCache), func(t *testing.T) {
 			testFileRename(t, test.mode, test.inCache, test.forceCache)
+		})
+	}
+}
+
+func renameSymlinkAndCheck(t *testing.T, r *fstest.Run, vfs *VFS, fileItem fstest.Item, inCache bool, linkSourceFilePath, linkTargetFilePath string) {
+	sourceFilePath, _ /*sourceIsLink*/ := vfs.TrimSymlink(linkSourceFilePath)
+	targetFilePath, _ /*targetIsLink*/ := vfs.TrimSymlink(linkTargetFilePath)
+
+	// Rename source to target
+	err := vfs.Rename(sourceFilePath, targetFilePath)
+	require.NoError(t, err)
+
+	// check source link has been renamed immediately in the cache
+	if inCache {
+		assert.False(t, vfs.cache.Exists(linkSourceFilePath))
+
+		if vfs.Opt.CacheMode >= vfscommon.CacheModeWrites {
+			assert.True(t, vfs.cache.Exists(linkTargetFilePath))
+		}
+	}
+
+	// check source link does not exists anymore in the vfs layer
+	_, err = vfs.Stat(sourceFilePath)
+	require.Error(t, err)
+
+	// check link exists in the vfs layer at its new name
+	link, err := vfs.Stat(targetFilePath)
+	require.NoError(t, err)
+
+	// Check link path match new path
+	require.Equal(t, linkTargetFilePath, link.Path())
+
+	// Check link has now been renamed on the remote
+	vfs.WaitForWriters(waitForWritersDelay)
+	fstest.CheckListingWithPrecision(t, r.Fremote, []fstest.Item{fileItem, newItemFromFile(link.(*File))}, nil, fs.ModTimeNotSupported)
+
+	// Check link contents
+	linkData, err := vfs.Readlink(targetFilePath)
+	require.NoError(t, err)
+	require.Equal(t, linkData, "dir/file1")
+}
+
+func testFileSymlinks(t *testing.T, mode vfscommon.CacheMode, inCache bool, forceCache bool, links bool) {
+	r, vfs, file, fileItem, _ /*link*/, _ /*linkItem*/, cleanup := fileCreateLinks(t, mode, links)
+	defer cleanup()
+
+	rootDir, err := vfs.Root()
+	require.NoError(t, err)
+
+	// force the file into the cache if required
+	if forceCache {
+		// write the file with read and write
+		fd, err := file.Open(os.O_RDWR | os.O_CREATE | os.O_TRUNC)
+		require.NoError(t, err)
+
+		n, err := fd.Write([]byte("file1 contents"))
+		require.NoError(t, err)
+		require.Equal(t, 14, n)
+
+		require.NoError(t, file.SetModTime(fileItem.ModTime))
+
+		err = fd.Close()
+		require.NoError(t, err)
+	}
+	vfs.WaitForWriters(waitForWritersDelay)
+
+	// check file in cache
+	if inCache {
+		// read contents to get file in cache
+		fileCheckContents(t, file)
+		assert.True(t, vfs.cache.Exists(fileItem.Path))
+	}
+
+	// start with "dir/file1"
+	r.CheckRemoteItems(t, fileItem)
+
+	// check file exists in the vfs layer at its new name
+	_, err = vfs.Stat("dir/file1")
+	require.NoError(t, err)
+
+	// Check file has now been on the remote
+	vfs.WaitForWriters(waitForWritersDelay)
+	fstest.CheckListingWithPrecision(t, r.Fremote, []fstest.Item{fileItem}, nil, fs.ModTimeNotSupported)
+
+	if !operations.CanServerSideMove(r.Fremote) {
+		t.Skip("skip as can't rename files")
+	}
+
+	// Set link name
+	fullLinkName := "link1" + fs.LinkSuffix
+	linkName, isLink := vfs.TrimSymlink(fullLinkName)
+
+	// Check link name
+	if links {
+		assert.True(t, linkName == strings.TrimSuffix(fullLinkName, fs.LinkSuffix))
+	} else {
+		assert.True(t, linkName == fullLinkName)
+	}
+
+	// Check link type
+	assert.True(t, isLink == links)
+
+	// Create symlink
+	err = vfs.Symlink("dir/file1", linkName)
+	require.NoError(t, err)
+
+	// Stat created symlink
+	link, err := vfs.Stat(linkName)
+	require.NoError(t, err)
+
+	// force the link into the cache if required
+	if forceCache {
+		// write the file with read and write
+		fd, err := link.Open(os.O_RDWR | os.O_CREATE | os.O_TRUNC)
+		require.NoError(t, err)
+
+		n, err := fd.Write([]byte("dir/file1"))
+		require.NoError(t, err)
+		require.Equal(t, 9, n)
+
+		err = fd.Close()
+		require.NoError(t, err)
+	}
+	vfs.WaitForWriters(waitForWritersDelay)
+
+	// check link in cache
+	if inCache {
+		// read contents to get link in cache
+		fileCheckGivenContents(t, link.(*File), "dir/file1")
+		assert.True(t, vfs.cache.Exists(link.Path()))
+	}
+
+	// Check link contents
+	linkData, err := vfs.Readlink(linkName)
+	require.NoError(t, err)
+	assert.Equal(t, linkData, "dir/file1")
+
+	// Check link in remote
+	linkItem := newItemFromFile(link.(*File))
+	r.CheckRemoteItems(t, fileItem, linkItem)
+
+	renameSymlinkAndCheck(t, r, vfs, fileItem, inCache, "link1"+fs.LinkSuffix, "link2"+fs.LinkSuffix)
+	renameSymlinkAndCheck(t, r, vfs, fileItem, inCache, "link2"+fs.LinkSuffix, "dir/link3"+fs.LinkSuffix)
+	renameSymlinkAndCheck(t, r, vfs, fileItem, inCache, "dir/link3"+fs.LinkSuffix, "link1"+fs.LinkSuffix)
+
+	// Remove link
+	err = rootDir.RemoveName(linkName)
+	require.NoError(t, err)
+	/*link, err = vfs.Stat(linkName)
+	require.NoError(t, err)
+	require.NoError(t, link.Remove())*/
+
+	// check link has been removed immediately from the cache
+	if inCache {
+		assert.False(t, vfs.cache.Exists(fullLinkName))
+	}
+
+	// Check link removed from remote
+	r.CheckRemoteItems(t, fileItem)
+}
+
+func TestFileSymlinks(t *testing.T) {
+	for _, test := range []struct {
+		mode       vfscommon.CacheMode
+		inCache    bool
+		forceCache bool
+		links      bool
+	}{
+		{mode: vfscommon.CacheModeOff, inCache: false},
+		{mode: vfscommon.CacheModeOff, inCache: false, links: true},
+		{mode: vfscommon.CacheModeMinimal, inCache: false},
+		{mode: vfscommon.CacheModeMinimal, inCache: false, links: true},
+		{mode: vfscommon.CacheModeMinimal, inCache: true, forceCache: true},
+		{mode: vfscommon.CacheModeMinimal, inCache: true, forceCache: true, links: true},
+		{mode: vfscommon.CacheModeWrites, inCache: false},
+		{mode: vfscommon.CacheModeWrites, inCache: false, links: true},
+		{mode: vfscommon.CacheModeWrites, inCache: true, forceCache: true},
+		{mode: vfscommon.CacheModeWrites, inCache: true, forceCache: true, links: true},
+		{mode: vfscommon.CacheModeFull, inCache: true},
+		{mode: vfscommon.CacheModeFull, inCache: true, links: true},
+	} {
+		t.Run(fmt.Sprintf("%v,forceCache=%v,links=%v", test.mode, test.forceCache, test.links), func(t *testing.T) {
+			testFileSymlinks(t, test.mode, test.inCache, test.forceCache, test.links)
 		})
 	}
 }
