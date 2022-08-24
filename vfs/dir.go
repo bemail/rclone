@@ -64,6 +64,13 @@ func newDir(vfs *VFS, f fs.Fs, parent *Dir, fsDir fs.Directory) *Dir {
 	}
 }
 
+func (d *Dir) _createFileMode(remote string) os.FileMode {
+	if d.vfs.IsSymlink(remote) {
+		return os.ModePerm | os.ModeSymlink
+	}
+	return d.vfs.Opt.FilePerms
+}
+
 // String converts it to printable
 func (d *Dir) String() string {
 	if d == nil {
@@ -406,7 +413,7 @@ func (d *Dir) AddVirtual(leaf string, size int64, isDir bool) {
 		entry := fs.NewDir(remote, time.Now())
 		node = newDir(d.vfs, d.f, d, entry)
 	} else {
-		f := newFile(d, dPath, nil, leaf)
+		f := newFile(d, dPath, nil, leaf, d._createFileMode(leaf))
 		f.setSize(size)
 		node = f
 	}
@@ -628,7 +635,7 @@ func (d *Dir) _readDirFromEntries(entries fs.DirEntries, dirTree dirtree.DirTree
 			if file, ok := node.(*File); node != nil && ok {
 				file.setObjectNoUpdate(obj)
 			} else {
-				node = newFile(d, d.path, obj, name)
+				node = newFile(d, d.path, obj, name, d._createFileMode(name))
 			}
 		case fs.Directory:
 			// Reuse old dir value if it exists
@@ -863,7 +870,7 @@ func (d *Dir) Create(name string, osFlags int, osMode os.FileMode) (*File, error
 		return nil, EROFS
 	}
 	// This gets added to the directory when the file is opened for write
-	return newFile(d, d.Path(), nil, name), nil
+	return newFile(d, d.Path(), nil, name, osMode), nil
 }
 
 // Mkdir creates a new directory
