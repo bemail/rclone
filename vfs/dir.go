@@ -706,23 +706,63 @@ func (d *Dir) readDir() error {
 func (d *Dir) stat(leaf string) (Node, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
 	err := d._readDir()
+
 	if err != nil {
 		return nil, err
 	}
+
 	item, ok := d.items[leaf]
 
-	if !ok && d.vfs.Opt.CaseInsensitive {
+	if !ok && (d.vfs.Opt.Links || d.vfs.Opt.CaseInsensitive) {
 		leafLower := strings.ToLower(leaf)
+		leafLink := leaf + fs.LinkSuffix
+		leafLinkLower := leafLower + fs.LinkSuffix
+
 		for name, node := range d.items {
-			if strings.ToLower(name) == leafLower {
-				if ok {
-					// duplicate case insensitive match is an error
-					return nil, fmt.Errorf("duplicate filename %q detected with --vfs-case-insensitive set", leaf)
+			if d.vfs.Opt.Links {
+				if leafLink == name {
+					if ok {
+						// duplicate symlink match is an error
+						return nil, fmt.Errorf("duplicate symlink filename (1) %q detected with --links set", leaf)
+					}
+
+					// found a symlink match
+					ok = true
+					item = node
+					// break
 				}
-				// found a case insensitive match
-				ok = true
-				item = node
+			}
+
+			if d.vfs.Opt.CaseInsensitive {
+				nameLower := strings.ToLower(name)
+
+				if nameLower == leafLower {
+					if ok {
+						// duplicate case insensitive match is an error
+						return nil, fmt.Errorf("duplicate filename %q detected with --vfs-case-insensitive set", leaf)
+					}
+
+					// found a case insensitive match
+					ok = true
+					item = node
+					// break
+				}
+
+				if d.vfs.Opt.Links {
+					if leafLink != name && leafLinkLower == nameLower {
+						if ok {
+							// duplicate case insensitive symlink match is an error
+							return nil, fmt.Errorf("duplicate symlink filename (2) %q detected with --vfs-case-insensitive --links set", leaf)
+						}
+
+						// found a case insensitive symlink match
+						ok = true
+						item = node
+						// break
+					}
+				}
 			}
 		}
 	}
@@ -730,6 +770,7 @@ func (d *Dir) stat(leaf string) (Node, error) {
 	if !ok {
 		return nil, ENOENT
 	}
+
 	return item, nil
 }
 
