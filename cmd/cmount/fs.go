@@ -252,7 +252,7 @@ func (fsys *FS) Readdir(dirPath string,
 	fill(".", nil, 0)
 	fill("..", nil, 0)
 	for _, node := range nodes {
-		name := node.Name()
+		name, _ := fsys.VFS.TrimSymlink(node.Name())
 		if len(name) > mountlib.MaxLeafSize {
 			fs.Errorf(dirPath, "Name too long (%d bytes) for FUSE, skipping: %s", len(name), name)
 			continue

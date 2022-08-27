@@ -117,7 +117,7 @@ func (d *Dir) ReadDirAll(ctx context.Context) (dirents []fuse.Dirent, err error)
 		Name: "..",
 	})
 	for _, node := range items {
-		name := node.Name()
+		name, isLink := d.VFS().TrimSymlink(node.Name())
 		if len(name) > mountlib.MaxLeafSize {
 			fs.Errorf(d, "Name too long (%d bytes) for FUSE, skipping: %s", len(name), name)
 			continue
@@ -127,7 +127,9 @@ func (d *Dir) ReadDirAll(ctx context.Context) (dirents []fuse.Dirent, err error)
 			Type: fuse.DT_File,
 			Name: name,
 		}
-		if node.IsDir() {
+		if isLink {
+			dirent.Type = fuse.DT_Link
+		} else if node.IsDir() {
 			dirent.Type = fuse.DT_Dir
 		}
 		dirents = append(dirents, dirent)
